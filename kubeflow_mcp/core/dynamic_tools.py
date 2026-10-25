@@ -61,7 +61,9 @@ def _build_args_model(func: Callable) -> type[BaseModel]:
     as a truthy string and skips the confirm gate. The model only validates, so
     execute_tool can reject bad arguments before it touches the circuit breaker.
     """
-    hints = get_type_hints(func)
+    # include_extras keeps Annotated metadata such as Field(ge=1); without it the
+    # constraint is dropped and execute_tool accepts values full mode rejects.
+    hints = get_type_hints(func, include_extras=True)
     fields: dict[str, Any] = {}
     for name, param in inspect.signature(func).parameters.items():
         default = ... if param.default is inspect.Parameter.empty else param.default
@@ -239,8 +241,9 @@ def execute_tool(tool_name: str, arguments: dict[str, Any] | None = None) -> dic
             "error_code": ErrorCode.VALIDATION_ERROR,
             "tool": tool_name,
         }
-    # Pass only what the caller sent, so omitted parameters keep the tool's defaults.
-    args = {name: getattr(validated, name) for name in validated.model_fields_set}
+    # Pass every field, defaults included, as full mode does: a parameter whose default is
+    # a pydantic Field() would otherwise receive the FieldInfo object instead of its value.
+    args = {name: getattr(validated, name) for name in type(validated).model_fields}
 
     breaker = get_breaker(tool_name)
     generation = breaker.acquire()
